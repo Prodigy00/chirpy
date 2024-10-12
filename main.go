@@ -7,6 +7,7 @@ import (
 
 func main() {
 	ns := http.NewServeMux()
+	ns.Handle("/", http.FileServer(http.Dir(".")))
 	server := http.Server{
 		Handler: ns,
 		Addr:    ":8080",
