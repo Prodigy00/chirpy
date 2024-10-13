@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Prodigy00/chirpy/internal/db"
-	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"log"
@@ -13,7 +12,6 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
-	"time"
 )
 
 type apiConfig struct {
@@ -22,7 +20,8 @@ type apiConfig struct {
 }
 
 type chirpReq struct {
-	Body string `json:"body"`
+	Body   string `json:"body"`
+	UserID string `json:"user_id"`
 }
 
 type validateErrResponse struct {
@@ -73,17 +72,10 @@ type createUserReq struct {
 	Email string `json:"email"`
 }
 
-type userRes struct {
-	ID        uuid.UUID `json:"id"`
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 func (cfg *apiConfig) CreateUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	var createUser *createUserReq
+	var createUser createUserReq
 
 	cfg.ToStruct(w, r, &createUser)
 
@@ -96,11 +88,11 @@ func (cfg *apiConfig) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	user := userRes{
+	user := db.User{
 		ID:        u.ID,
 		Email:     u.Email,
-		CreatedAt: u.CreatedAt.Time,
-		UpdatedAt: u.UpdatedAt.Time,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
 	}
 
 	cfg.ToJSON(w, user)
@@ -110,7 +102,7 @@ func (cfg *apiConfig) CreateUser(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) ValidateChirp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	var validated *chirpReq
+	var validated db.CreateChirpParams
 
 	cfg.ToStruct(w, r, &validated)
 
@@ -140,11 +132,28 @@ func (cfg *apiConfig) ValidateChirp(w http.ResponseWriter, r *http.Request) {
 	for _, wr := range formatted {
 		cb += wr
 	}
-	res := chirpRes{
-		CleanedBody: strings.TrimSpace(cb),
+
+	cleanedParams := db.CreateChirpParams{
+		Body:   strings.TrimSpace(cb),
+		UserID: validated.UserID,
 	}
+
+	ch, err := cfg.queries.CreateChirp(r.Context(), cleanedParams)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		cfg.ToJSON(w, fmt.Sprintf("error creating chirp:%v", err))
+	}
+
+	created := db.Chirp{
+		ID:        ch.ID,
+		Body:      ch.Body,
+		CreatedAt: ch.CreatedAt,
+		UpdatedAt: ch.UpdatedAt,
+		UserID:    ch.UserID,
+	}
+
 	w.WriteHeader(http.StatusOK)
-	cfg.ToJSON(w, res)
+	cfg.ToJSON(w, created)
 	return
 }
 
@@ -199,12 +208,12 @@ func main() {
 	ns.HandleFunc("GET /admin/metrics", c.FileServerHits)
 	ns.HandleFunc("POST /admin/reset", c.Reset)
 	ns.HandleFunc("POST /api/users", c.CreateUser)
+	ns.HandleFunc("POST /api/chirps", c.ValidateChirp)
 	server := http.Server{
 		Handler: ns,
 		Addr:    ":8080",
 	}
 
-	ns.HandleFunc("POST /api/validate_chirp", c.ValidateChirp)
 	err := server.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
