@@ -1,16 +1,22 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/Prodigy00/chirpy/internal/db"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	queries        *db.Queries
 }
 
 type chirpReq struct {
@@ -114,9 +120,21 @@ func (cfg *apiConfig) FileServerHits(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	godotenv.Load()
+	dbUrl := os.Getenv("DB_URL")
+
+	database, sqlErr := sql.Open("postgres", dbUrl)
+	if sqlErr != nil {
+		log.Fatalf("error accessing db:%v\n", sqlErr)
+	}
+
+	dbQueries := db.New(database)
+
 	ns := http.NewServeMux()
 	fs := http.FileServer(http.Dir("."))
 	c := NewApiConfig()
+	c.queries = dbQueries
+
 	stripped := http.StripPrefix("/app/", fs)
 
 	ns.Handle("/app/", c.middlewareMetricsInc(stripped))
