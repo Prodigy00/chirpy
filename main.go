@@ -25,11 +25,13 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 func (cfg *apiConfig) Reset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "<html>\n  <body>\n   <p>Reset Ok!</p>\n  </body>\n</html>")
 }
 
 func (cfg *apiConfig) FileServerHits(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits.Load())))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, "<html>\n  <body>\n    <h1>Welcome, Chirpy Admin</h1>\n    <p>Chirpy has been visited %d times!</p>\n  </body>\n</html>", cfg.fileserverHits.Load())
 }
 
 func main() {
@@ -41,15 +43,15 @@ func main() {
 	ns.Handle("/app/", c.middlewareMetricsInc(stripped))
 	ns.Handle("/app/assets/logo.png", stripped)
 
-	ns.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	ns.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 
 		w.Write([]byte("OK"))
 	})
 
-	ns.HandleFunc("/metrics", c.FileServerHits)
-	ns.HandleFunc("/reset", c.Reset)
+	ns.HandleFunc("GET /admin/metrics", c.FileServerHits)
+	ns.HandleFunc("POST /admin/reset", c.Reset)
 	server := http.Server{
 		Handler: ns,
 		Addr:    ":8080",
