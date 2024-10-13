@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Prodigy00/chirpy/internal/db"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 type apiConfig struct {
@@ -37,9 +39,18 @@ func NewApiConfig() *apiConfig {
 
 func (cfg *apiConfig) ToJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("error encoding json:%s\n", err.Error()), http.StatusInternalServerError)
 		return
 	}
+	return
+}
+
+func (cfg *apiConfig) ToStruct(w http.ResponseWriter, r *http.Request, v any) {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		http.Error(w, fmt.Sprintf("error decoding json:%s\n", err.Error()), http.StatusBadRequest)
+		return
+	}
+	return
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -49,6 +60,7 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(incSrvHits)
 }
+
 func bannedWords() map[string]int {
 	return map[string]int{
 		"kerfuffle": 1,
@@ -56,22 +68,51 @@ func bannedWords() map[string]int {
 		"fornax":    1,
 	}
 }
-func (cfg *apiConfig) ValidateChirp(w http.ResponseWriter, r *http.Request) {
 
+type createUserReq struct {
+	Email string `json:"email"`
+}
+
+type userRes struct {
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (cfg *apiConfig) CreateUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	decoder := json.NewDecoder(r.Body)
+	var createUser *createUserReq
 
-	var validated chirpReq
+	cfg.ToStruct(w, r, &createUser)
 
-	if err := decoder.Decode(&validated); err != nil {
-		somethingWentWrong := validateErrResponse{
-			Error: "something went wrong.",
-		}
+	u, err := cfg.queries.CreateUser(r.Context(), createUser.Email)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		cfg.ToJSON(w, somethingWentWrong)
-		return
+		cfg.ToJSON(w, validateErrResponse{
+			Error: fmt.Sprintf("error creating user:%v", err),
+		})
 	}
+
+	w.WriteHeader(http.StatusCreated)
+	user := userRes{
+		ID:        u.ID,
+		Email:     u.Email,
+		CreatedAt: u.CreatedAt.Time,
+		UpdatedAt: u.UpdatedAt.Time,
+	}
+
+	cfg.ToJSON(w, user)
+	return
+}
+
+func (cfg *apiConfig) ValidateChirp(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var validated *chirpReq
+
+	cfg.ToStruct(w, r, &validated)
 
 	if len(validated.Body) > 140 {
 		chirpTooLongErr := validateErrResponse{
@@ -109,8 +150,16 @@ func (cfg *apiConfig) ValidateChirp(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) Reset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
+	err := cfg.queries.DeleteUsers(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		cfg.ToJSON(w, fmt.Errorf("error deleting users: %v\n", err))
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "<html>\n  <body>\n   <p>Reset Ok!</p>\n  </body>\n</html>")
+	return
 }
 
 func (cfg *apiConfig) FileServerHits(w http.ResponseWriter, req *http.Request) {
@@ -149,6 +198,7 @@ func main() {
 
 	ns.HandleFunc("GET /admin/metrics", c.FileServerHits)
 	ns.HandleFunc("POST /admin/reset", c.Reset)
+	ns.HandleFunc("POST /api/users", c.CreateUser)
 	server := http.Server{
 		Handler: ns,
 		Addr:    ":8080",
