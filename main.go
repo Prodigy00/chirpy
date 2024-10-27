@@ -152,8 +152,20 @@ func (cfg *apiConfig) ValidateChirp(w http.ResponseWriter, r *http.Request) {
 		UserID:    ch.UserID,
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
 	cfg.ToJSON(w, created)
+	return
+}
+
+func (cfg *apiConfig) GetChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.queries.GetChirps(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		cfg.ToJSON(w, fmt.Errorf("error fetching chirps: %v\n", err))
+		return
+	}
+	fmt.Printf("chirps::%v", chirps)
+	cfg.ToJSON(w, chirps)
 	return
 }
 
@@ -209,6 +221,7 @@ func main() {
 	ns.HandleFunc("POST /admin/reset", c.Reset)
 	ns.HandleFunc("POST /api/users", c.CreateUser)
 	ns.HandleFunc("POST /api/chirps", c.ValidateChirp)
+	ns.HandleFunc("GET /api/chirps", c.GetChirps)
 	server := http.Server{
 		Handler: ns,
 		Addr:    ":8080",

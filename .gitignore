@@ -2,3 +2,7 @@
 bin/*
 .env
 /chirpy
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/chirpy.iml
+/.idea/modules.xml
+/.idea/vcs.xml
